@@ -104,39 +104,78 @@ def generate_entitlements(provision_entitlements, app):
         app=app['filename']
     ), shell=True, stdout=subprocess.PIPE)
     entitlements = read_plist_from_string(p.communicate()[0])
-    access_groups = entitlements.get('keychain-access-groups')
+#     access_groups = entitlements.get('keychain-access-groups')
 
     # use application keychain-acccess-groups in the new entitlements
-    if access_groups:
-        provision_entitlements['keychain-access-groups'] = access_groups
+#     if access_groups:
+#         provision_entitlements['keychain-access-groups'] = access_groups
     return provision_entitlements
 
 
-def recodesign(app, provision, identity, dryrun=False):
+def recodesign(app, provision, identity, dryrun=False, verbose=False):
     """
     ReCodeSign a given app with a given provision and identity pair.
     """
     # embeding a new provisioning profile
     if not dryrun:
+        print 'embeding a new provisioning profile:', provision['filename'], ' -> ', app['provision']['filename']
         shutil.copyfile(provision['filename'], app['provision']['filename'])
 
     # generate a new entitlements
-    entitlements_dict = generate_entitlements(provision['entitlements'], app)
     entitlements = tempfile.NamedTemporaryFile(suffix=".plist", delete=False)
+    print 'generate a new entitlements:', entitlements.name
+    entitlements_dict = generate_entitlements(provision['entitlements'], app)
     entitlements.write(write_plist_to_string(entitlements_dict))
     entitlements.close()
 
     # recodesign
-    command = 'codesign {dryrun} -f -s "{identity}" --entitlements {entitlements} ' \
-              '--preserve-metadata=resource-rules {app}'
-
-    p = subprocess.Popen(command.format(
+    command = 'codesign {dryrun} -f -s "{identity}" --entitlements "{entitlements}" ' \
+              '--no-strict "{app}" {verbose}'
+    command = command.format(
         dryrun='--dryrun' if dryrun else '',
         identity=identity,
         entitlements=entitlements.name,
-        app=app['filename']
-    ), shell=True, stderr=subprocess.PIPE)
+        app=app['filename'],
+        verbose='--verbose' if verbose else ''
+    )
+    print 'codesigning: \n  %s' % command
+    p = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     p.wait()
+
+    if verbose:
+        out, err = p.communicate()
+        if out:
+            print out
+        if err:
+            print err
+
+    if p.returncode == 0:
+        print 'codesign success.'
+    else:
+        print 'codesign failed.'
+        exit(1)
+
+    command = 'codesign --verify "{app}" {verbose}'
+    command = command.format(
+        app=app['filename'],
+        verbose='--verbose' if verbose else ''
+    )
+    print 'verifying codesign: \n  %s' % command
+    p = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    p.wait()
+
+    if verbose:
+        out, err = p.communicate()
+        if out:
+            print out
+        if err:
+            print err
+
+    if p.returncode == 0:
+        print 'verify codesign pass.'
+    else:
+        print 'verify codesign failed.'
+        exit(1)
 
     os.unlink(entitlements.name)
 
@@ -167,16 +206,17 @@ def main():
     application = read_application(arguments.app)
     provision = read_provisioning_profile(arguments.provisioning_profile)
     identity = arguments.identity
+    
+    # recodesigning!
+    print('* Recodesigning :: {old} => {new}'.format(
+        old=application['provision']['name'], new=provision['name']))
 
     # print verbose information
     if arguments.verbose:
         show_provision_info(application['provision'])
         show_provision_info(provision)
 
-    # recodesigning!
-    print('* Recodesigning :: {old} => {new}'.format(
-        old=application['provision']['name'], new=provision['name']))
-    recodesign(application, provision, identity, arguments.dryrun)
+    recodesign(application, provision, identity, arguments.dryrun, verbose=arguments.verbose)
     print('* done!')
 
 
