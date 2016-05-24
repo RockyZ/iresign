@@ -118,12 +118,15 @@ def recodesign(app, provision, identity, dryrun=False, verbose=False):
     """
     # embeding a new provisioning profile
     if not dryrun:
-        print 'embeding a new provisioning profile:', provision['filename'], ' -> ', app['provision']['filename']
+        print('embeding a new provisioning profile:', provision['filename'], ' -> ', app['provision']['filename'])
         shutil.copyfile(provision['filename'], app['provision']['filename'])
+
+    for framework_path in frameworks_in_app(app):
+        recodesign_frameworks(framework_path, identity, dryrun=dryrun, verbose=verbose)
 
     # generate a new entitlements
     entitlements = tempfile.NamedTemporaryFile(suffix=".plist", delete=False)
-    print 'generate a new entitlements:', entitlements.name
+    print('generate a new entitlements:', entitlements.name)
     entitlements_dict = generate_entitlements(provision['entitlements'], app)
     entitlements.write(write_plist_to_string(entitlements_dict))
     entitlements.close()
@@ -138,21 +141,21 @@ def recodesign(app, provision, identity, dryrun=False, verbose=False):
         app=app['filename'],
         verbose='--verbose' if verbose else ''
     )
-    print 'codesigning: \n  %s' % command
+    print('codesigning: \n  %s' % command)
     p = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     p.wait()
 
     if verbose:
         out, err = p.communicate()
         if out:
-            print out
+            print(out)
         if err:
-            print err
+            print(err)
 
     if p.returncode == 0:
-        print 'codesign success.'
+        print('codesign success.')
     else:
-        print 'codesign failed.'
+        print('codesign failed.')
         exit(1)
 
     command = 'codesign --verify "{app}" {verbose}'
@@ -160,25 +163,24 @@ def recodesign(app, provision, identity, dryrun=False, verbose=False):
         app=app['filename'],
         verbose='--verbose' if verbose else ''
     )
-    print 'verifying codesign: \n  %s' % command
+    print('verifying codesign: \n  %s' % command)
     p = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     p.wait()
 
     if verbose:
         out, err = p.communicate()
         if out:
-            print out
+            print(out)
         if err:
-            print err
+            print(err)
 
     if p.returncode == 0:
-        print 'verify codesign pass.'
+        print('verify codesign pass.')
     else:
-        print 'verify codesign failed.'
+        print('verify codesign failed.')
         exit(1)
 
     os.unlink(entitlements.name)
-
 
 def show_provision_info(provision):
     """
@@ -194,6 +196,50 @@ def show_provision_info(provision):
     print('    Task Allow:   %s' % provision['task_allow'])
     print('')
 
+def recodesign_frameworks(framework_path, identity, dryrun=False, verbose=False):
+
+    dylib = dylib_name_in_framework(framework_path)
+
+    if not dylib:
+        print('not found dylib in %s' % framework_path)
+        return
+
+    command = 'codesign {dryrun} -f -s "{identity}" --preserve-metadata=identifier,entitlements ' \
+              '"{dylib}" {verbose}'
+
+    command = command.format(
+        dryrun='--dryrun' if dryrun else '',
+        identity=identity,
+        dylib=os.path.join(framework_path, dylib),
+        verbose='--verbose' if verbose else ''
+    )
+
+    print('verifying framework: \n  %s' % command)
+    p = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    p.wait()
+
+    if verbose:
+        out, err = p.communicate()
+        if out:
+            print(out)
+        if err:
+            print(err)
+
+    if p.returncode == 0:
+        print('verify codesign pass:', framework_path)
+    else:
+        print('verify codesign failed:', framework_path)
+        exit(1)
+
+def dylib_name_in_framework(framework_path):
+    content = {}
+    with open(os.path.join(framework_path, 'Info.plist'), 'rb') as f:
+        content = plistlib.readPlist(f)
+
+    return content['CFBundleExecutable'] 
+
+def frameworks_in_app(app):
+    return [root for root, dirs, files in os.walk(app['filename']) if root.endswith('framework')]
 
 def main():
     """
@@ -206,7 +252,7 @@ def main():
     application = read_application(arguments.app)
     provision = read_provisioning_profile(arguments.provisioning_profile)
     identity = arguments.identity
-    
+
     # recodesigning!
     print('* Recodesigning :: {old} => {new}'.format(
         old=application['provision']['name'], new=provision['name']))
