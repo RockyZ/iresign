@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # coding: utf-8
 """
     iResign
@@ -214,7 +214,7 @@ def recodesign_frameworks(framework_path, identity, dryrun=False, verbose=False)
         verbose='--verbose' if verbose else ''
     )
 
-    print('verifying framework: \n  %s' % command)
+    print('codesign framework: \n  %s' % command)
     p = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     p.wait()
 
